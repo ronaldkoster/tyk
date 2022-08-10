@@ -2,9 +2,13 @@ package gateway
 
 import (
 	"bytes"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
+	"github.com/TykTechnologies/tyk/certs"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -101,6 +105,23 @@ func (c *CoProcessor) BuildObject(req *http.Request, res *http.Response, spec *A
 		Scheme:     scheme,
 	}
 
+	var certificate string
+	if req.TLS != nil {
+		rawCerts := make([][]byte, len(req.TLS.PeerCertificates))
+		metaCerts := make([][]byte, len(req.TLS.PeerCertificates))
+
+		if len(req.TLS.PeerCertificates) > 0 {
+			cert := req.TLS.PeerCertificates[0]
+			rawCerts[0] = cert.Raw
+			tlsCert := tls.Certificate{Leaf: cert}
+			meta := certs.ExtractCertificateMeta(&tlsCert, strconv.Itoa(0))
+			metaJSON, _ := json.Marshal(meta)
+			metaCerts[0] = metaJSON
+
+			certificate = base64.StdEncoding.EncodeToString(cert.Raw)
+		}
+	}
+
 	if req.Body != nil {
 		defer req.Body.Close()
 		var err error
@@ -152,6 +173,13 @@ func (c *CoProcessor) BuildObject(req *http.Request, res *http.Response, spec *A
 			// For compatibility purposes:
 			object.Metadata = object.Session.Metadata
 		}
+	}
+
+	if certificate != "" {
+		if object.Metadata == nil {
+			object.Metadata = make(map[string]string)
+		}
+		object.Metadata["client_certificate"] = certificate
 	}
 
 	// Append response data if it's available:
